@@ -14,6 +14,7 @@
 - **Beautiful TUI** - Modern interface with graphs, colors, and intuitive navigation
 - **Minimal Footprint** - Written in Rust for maximum efficiency
 - **Real-time Updates** - Live monitoring with configurable refresh rate
+- **Process Control** - Stop (`SIGTERM`) or kill (`SIGKILL`) selected processes directly from the TUI
 
 ## Screenshots
 
@@ -92,8 +93,26 @@ ramwise --debug
 | `s` | Cycle sort mode (RSS/PSS/Private/Name/PID) |
 | `g` | Go to top of list |
 | `G` | Go to bottom of list |
+| `x` | Send `SIGTERM` to selected process |
+| `X` | Confirm and send `SIGKILL` to selected process |
 | `?` | Toggle help overlay |
 | `q` | Quit |
+
+Notes:
+- `SIGKILL` requires confirmation in-app (`Enter` confirm, `Esc` cancel).
+- Process control follows OS permissions; root-owned processes may return permission errors.
+
+## Process Control
+
+ramwise now supports direct process signaling from the process list:
+
+1. Select a process with `j/k` or `↑/↓`.
+2. Press `x` to send `SIGTERM` (graceful stop).
+3. Press `X` to open kill confirmation, then:
+   - `Enter` to send `SIGKILL`
+   - `Esc` to cancel
+
+Action results are shown as in-app status messages (success, warning, or error).
 
 ## Insight Rules
 

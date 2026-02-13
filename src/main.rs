@@ -3,10 +3,11 @@
 //! A TUI application that provides deep memory introspection,
 //! intelligent insights, and beautiful visualization.
 
-mod app;
 mod analyzer;
+mod app;
 mod collector;
 mod history;
+mod process_control;
 mod ui;
 mod utils;
 
@@ -18,21 +19,24 @@ use clap::Parser;
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{
-    backend::CrosstermBackend,
-    widgets::{Block, Borders, Clear, Paragraph, Wrap},
     Terminal,
+    backend::CrosstermBackend,
+    layout::{Alignment, Rect},
+    style::Style,
+    text::{Line, Span},
+    widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
 use tokio::sync::mpsc;
 
-use app::{App, Focus};
+use app::{ActionStatus, ActionStatusKind, App, Focus};
 use collector::Collector;
+use ui::Layout;
 use ui::widgets::{
     DetailPanelWidget, GraphWidget, HeaderWidget, InsightsPanelWidget, ProcessListWidget,
 };
-use ui::Layout;
 
 /// Intelligent RAM usage visualizer for Arch Linux
 #[derive(Parser, Debug)]
@@ -121,6 +125,8 @@ async fn run_app(
     let layout = Layout::new();
 
     loop {
+        app.prune_transient_state();
+
         // Draw
         terminal.draw(|frame| {
             let areas = layout.calculate(frame.area());
@@ -130,8 +136,8 @@ async fn run_app(
                 let header = HeaderWidget::new(&snapshot.system, &app.theme);
                 frame.render_widget(header, areas.header);
             } else {
-                let loading = Paragraph::new(" ramwise - Loading...")
-                    .style(app.theme.header_style());
+                let loading =
+                    Paragraph::new(" ramwise - Loading...").style(app.theme.header_style());
                 frame.render_widget(loading, areas.header);
             }
 
@@ -141,13 +147,9 @@ async fn run_app(
                 let focus = app.focus;
                 let processes = app.processes().to_vec();
                 let theme = app.theme.clone();
-                
-                let process_list = ProcessListWidget::new(
-                    &processes,
-                    &theme,
-                    total_mem,
-                )
-                .focused(focus == Focus::ProcessList);
+
+                let process_list = ProcessListWidget::new(&processes, &theme, total_mem)
+                    .focused(focus == Focus::ProcessList);
 
                 frame.render_stateful_widget(
                     process_list,
@@ -182,6 +184,15 @@ async fn run_app(
             if app.show_help {
                 render_help_overlay(frame, &app.theme);
             }
+
+            // Kill confirmation overlay
+            if app.show_kill_confirm {
+                render_kill_confirm_overlay(frame, app);
+            }
+
+            if let Some(status) = app.action_status.as_ref() {
+                render_action_status(frame, &app.theme, status);
+            }
         })?;
 
         // Handle events (with timeout for data updates)
@@ -211,10 +222,7 @@ async fn run_app(
     Ok(())
 }
 
-fn render_help_overlay(
-    frame: &mut ratatui::Frame,
-    theme: &ui::Theme,
-) {
+fn render_help_overlay(frame: &mut ratatui::Frame, theme: &ui::Theme) {
     let area = frame.area();
 
     // Center a help box
@@ -240,6 +248,8 @@ fn render_help_overlay(
     s            Cycle sort mode
     g            Go to top
     G            Go to bottom
+    x            Send SIGTERM
+    X            Confirm + send SIGKILL
 
   General:
     ?            Toggle this help
@@ -260,4 +270,73 @@ fn render_help_overlay(
         .wrap(Wrap { trim: false });
 
     frame.render_widget(help, help_area);
+}
+
+fn render_kill_confirm_overlay(frame: &mut ratatui::Frame, app: &App) {
+    let area = frame.area();
+    let width = 62.min(area.width.saturating_sub(4));
+    let height = 7.min(area.height.saturating_sub(2));
+    let x = (area.width.saturating_sub(width)) / 2;
+    let y = (area.height.saturating_sub(height)) / 2;
+    let modal_area = Rect::new(x, y, width, height);
+
+    frame.render_widget(Clear, modal_area);
+
+    let label = if let Some(proc_) = app.selected_process() {
+        format!("Kill {} (PID {}) with SIGKILL?", proc_.name, proc_.pid)
+    } else {
+        "No process selected".to_string()
+    };
+
+    let message = vec![
+        Line::from(Span::styled(label, Style::default().fg(app.theme.warning))),
+        Line::from(""),
+        Line::from("Press Enter to confirm, Esc to cancel"),
+    ];
+
+    let paragraph = Paragraph::new(message).alignment(Alignment::Center).block(
+        Block::default()
+            .title(" Confirm Kill ")
+            .borders(Borders::ALL)
+            .border_style(app.theme.border_style(true))
+            .style(app.theme.base_style()),
+    );
+
+    frame.render_widget(paragraph, modal_area);
+}
+
+fn render_action_status(frame: &mut ratatui::Frame, theme: &ui::Theme, status: &ActionStatus) {
+    let area = frame.area();
+    let width = 70.min(area.width.saturating_sub(4));
+    let height = 3;
+    let x = (area.width.saturating_sub(width)) / 2;
+    let y = area.height.saturating_sub(height + 1);
+    let toast_area = Rect::new(x, y, width, height);
+
+    frame.render_widget(Clear, toast_area);
+
+    let color = match status.kind {
+        ActionStatusKind::Success => theme.success,
+        ActionStatusKind::Warning => theme.warning,
+        ActionStatusKind::Error => theme.error,
+    };
+    let label = match status.kind {
+        ActionStatusKind::Success => "OK",
+        ActionStatusKind::Warning => "WARN",
+        ActionStatusKind::Error => "ERR",
+    };
+
+    let line = Line::from(vec![
+        Span::styled(format!("[{}] ", label), Style::default().fg(color)),
+        Span::styled(&status.message, Style::default().fg(theme.fg)),
+    ]);
+
+    let paragraph = Paragraph::new(line).alignment(Alignment::Left).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(color))
+            .style(theme.base_style()),
+    );
+
+    frame.render_widget(paragraph, toast_area);
 }

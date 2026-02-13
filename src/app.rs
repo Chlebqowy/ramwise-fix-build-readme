@@ -1,12 +1,15 @@
 //! Application state and main logic
 
+use std::time::{Duration, Instant};
+
 use crossterm::event::{KeyCode, KeyModifiers};
 
 use crate::analyzer::Analyzer;
 use crate::collector::{MemorySnapshot, ProcessMemory};
 use crate::history::HistoryBuffer;
-use crate::ui::widgets::{ProcessListState, SortMode};
+use crate::process_control::{SignalAction, SignalResult, send_signal};
 use crate::ui::Theme;
+use crate::ui::widgets::{ProcessListState, SortMode};
 
 /// Focus state for keyboard navigation
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -38,6 +41,24 @@ impl Focus {
     }
 }
 
+/// Status severity for action feedback.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActionStatusKind {
+    Success,
+    Warning,
+    Error,
+}
+
+/// Transient status message shown in UI after process actions.
+#[derive(Debug, Clone)]
+pub struct ActionStatus {
+    pub kind: ActionStatusKind,
+    pub message: String,
+    pub expires_at: Instant,
+}
+
+const STATUS_TTL: Duration = Duration::from_secs(4);
+
 /// Main application state
 pub struct App {
     /// Whether the app should quit
@@ -56,6 +77,10 @@ pub struct App {
     pub process_list_state: ProcessListState,
     /// Whether to show help overlay
     pub show_help: bool,
+    /// Whether SIGKILL confirmation dialog is visible
+    pub show_kill_confirm: bool,
+    /// Transient status for process action feedback
+    pub action_status: Option<ActionStatus>,
     /// Sorted processes (cached)
     sorted_processes: Vec<ProcessMemory>,
 }
@@ -72,6 +97,8 @@ impl App {
             analyzer: Analyzer::new(),
             process_list_state: ProcessListState::new(),
             show_help: false,
+            show_kill_confirm: false,
+            action_status: None,
             sorted_processes: Vec::new(),
         }
     }
@@ -106,7 +133,8 @@ impl App {
                 self.sorted_processes.sort_by(|a, b| b.pss.cmp(&a.pss));
             }
             SortMode::Private => {
-                self.sorted_processes.sort_by(|a, b| b.private.cmp(&a.private));
+                self.sorted_processes
+                    .sort_by(|a, b| b.private.cmp(&a.private));
             }
             SortMode::Name => {
                 self.sorted_processes.sort_by(|a, b| a.name.cmp(&b.name));
@@ -121,7 +149,11 @@ impl App {
     fn update_selection(&mut self) {
         // Try to keep the same process selected
         if let Some(selected_pid) = self.process_list_state.selected_pid {
-            if let Some(idx) = self.sorted_processes.iter().position(|p| p.pid == selected_pid) {
+            if let Some(idx) = self
+                .sorted_processes
+                .iter()
+                .position(|p| p.pid == selected_pid)
+            {
                 self.process_list_state.list_state.select(Some(idx));
                 return;
             }
@@ -145,7 +177,8 @@ impl App {
                 self.sorted_processes.sort_by(|a, b| b.pss.cmp(&a.pss));
             }
             SortMode::Private => {
-                self.sorted_processes.sort_by(|a, b| b.private.cmp(&a.private));
+                self.sorted_processes
+                    .sort_by(|a, b| b.private.cmp(&a.private));
             }
             SortMode::Name => {
                 self.sorted_processes.sort_by(|a, b| a.name.cmp(&b.name));
@@ -170,6 +203,11 @@ impl App {
 
     /// Handle keyboard input
     pub fn handle_key(&mut self, key: KeyCode, modifiers: KeyModifiers) {
+        if self.show_kill_confirm {
+            self.handle_kill_confirm_key(key);
+            return;
+        }
+
         // Global keys
         match (key, modifiers) {
             (KeyCode::Char('q'), _) | (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
@@ -209,11 +247,13 @@ impl App {
     fn handle_process_list_key(&mut self, key: KeyCode) {
         match key {
             KeyCode::Up | KeyCode::Char('k') => {
-                self.process_list_state.select_previous(self.sorted_processes.len());
+                self.process_list_state
+                    .select_previous(self.sorted_processes.len());
                 self.update_selected_pid();
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                self.process_list_state.select_next(self.sorted_processes.len());
+                self.process_list_state
+                    .select_next(self.sorted_processes.len());
                 self.update_selected_pid();
             }
             KeyCode::Char('s') => {
@@ -228,8 +268,20 @@ impl App {
             }
             KeyCode::End | KeyCode::Char('G') => {
                 if !self.sorted_processes.is_empty() {
-                    self.process_list_state.list_state.select(Some(self.sorted_processes.len() - 1));
+                    self.process_list_state
+                        .list_state
+                        .select(Some(self.sorted_processes.len() - 1));
                     self.update_selected_pid();
+                }
+            }
+            KeyCode::Char('x') => {
+                self.signal_selected_process(SignalAction::Terminate);
+            }
+            KeyCode::Char('X') => {
+                if self.selected_process().is_none() {
+                    self.set_status(ActionStatusKind::Warning, "No process selected");
+                } else {
+                    self.show_kill_confirm = true;
                 }
             }
             _ => {}
@@ -243,10 +295,135 @@ impl App {
             }
         }
     }
+
+    /// Remove expired transient messages.
+    pub fn prune_transient_state(&mut self) {
+        if let Some(status) = &self.action_status {
+            if Instant::now() >= status.expires_at {
+                self.action_status = None;
+            }
+        }
+    }
+
+    fn handle_kill_confirm_key(&mut self, key: KeyCode) {
+        match key {
+            KeyCode::Enter => {
+                self.show_kill_confirm = false;
+                self.signal_selected_process(SignalAction::Kill);
+            }
+            KeyCode::Esc => {
+                self.show_kill_confirm = false;
+                self.set_status(ActionStatusKind::Warning, "Kill action canceled");
+            }
+            _ => {}
+        }
+    }
+
+    fn signal_selected_process(&mut self, action: SignalAction) {
+        let Some(process) = self.selected_process() else {
+            self.set_status(ActionStatusKind::Warning, "No process selected");
+            return;
+        };
+
+        let pid = process.pid;
+        let name = process.name.clone();
+        let result = send_signal(pid, action);
+        self.apply_signal_result(result, action, pid, &name);
+    }
+
+    fn apply_signal_result(
+        &mut self,
+        result: SignalResult,
+        action: SignalAction,
+        pid: i32,
+        name: &str,
+    ) {
+        match result {
+            SignalResult::Sent => {
+                self.set_status(
+                    ActionStatusKind::Success,
+                    format!("{} sent to {} (PID {})", action.as_label(), name, pid),
+                );
+            }
+            SignalResult::NotFound => {
+                self.set_status(
+                    ActionStatusKind::Warning,
+                    format!("Process {} (PID {}) no longer exists", name, pid),
+                );
+            }
+            SignalResult::PermissionDenied => {
+                self.set_status(
+                    ActionStatusKind::Error,
+                    format!("Permission denied for {} (PID {})", name, pid),
+                );
+            }
+            SignalResult::InvalidTarget => {
+                self.set_status(
+                    ActionStatusKind::Warning,
+                    format!("Refusing to signal protected PID {}", pid),
+                );
+            }
+            SignalResult::Failed(err) => {
+                self.set_status(
+                    ActionStatusKind::Error,
+                    format!("Failed to send {}: {}", action.as_label(), err),
+                );
+            }
+        }
+    }
+
+    fn set_status(&mut self, kind: ActionStatusKind, message: impl Into<String>) {
+        self.action_status = Some(ActionStatus {
+            kind,
+            message: message.into(),
+            expires_at: Instant::now() + STATUS_TTL,
+        });
+    }
 }
 
 impl Default for App {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn kill_confirm_toggles_on_selection() {
+        let mut app = App::new();
+        app.sorted_processes.push(ProcessMemory {
+            pid: 4242,
+            name: "worker".to_string(),
+            ..ProcessMemory::default()
+        });
+        app.process_list_state.list_state.select(Some(0));
+
+        app.handle_key(KeyCode::Char('X'), KeyModifiers::NONE);
+        assert!(app.show_kill_confirm);
+    }
+
+    #[test]
+    fn kill_confirm_esc_cancels_modal() {
+        let mut app = App::new();
+        app.show_kill_confirm = true;
+
+        app.handle_key(KeyCode::Esc, KeyModifiers::NONE);
+
+        assert!(!app.show_kill_confirm);
+        assert!(app.action_status.is_some());
+    }
+
+    #[test]
+    fn kill_key_without_selection_sets_warning() {
+        let mut app = App::new();
+        app.handle_key(KeyCode::Char('x'), KeyModifiers::NONE);
+
+        assert!(matches!(
+            app.action_status.as_ref().map(|s| s.kind),
+            Some(ActionStatusKind::Warning)
+        ));
     }
 }
