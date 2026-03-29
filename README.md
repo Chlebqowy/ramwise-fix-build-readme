@@ -122,6 +122,7 @@ Action results are shown as in-app status messages (success, warning, or error).
 Sadly, there is no one single easy-to-use config. You have to make changes to the code itself but it's fairly easy and a lot is explained in comments. 
 
 To modify the layout, go to src/ui/layout.rs. If you are not very experienced with coding, just modify the values in pub fn new() -> Self { Self {. If you can code, you can also modify the rest of the file. The layout and library is fairly simple. 
+If you changed the layout by changing the rest of the file, make sure to modify impl Focus { to reflect those changes.
 
 To modify the theme, go to src/ui/theme.rs
 pub fn dark() -> Self {
@@ -132,7 +133,7 @@ If the theme is custom, you have to add it to
 impl App {
     /// Create a new application
     pub fn new(theme: str) -> Self {
-in app.rs 
+in app.rs
 
 
 ## Insight Rules
