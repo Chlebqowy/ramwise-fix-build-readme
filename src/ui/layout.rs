@@ -26,8 +26,8 @@ impl Layout {
     pub fn new() -> Self {
         Self {
             header_height: 1,
-            center_height: 0, // Will be remaining space unless constraint types are changed
-            bottom_height: 4,
+            center_height: 5, // Will be remaining space unless constraint types are changed
+            bottom_height: 0,
             left_width_percent: 40,
             side_vertical_split_percent: 60,
              
@@ -46,7 +46,7 @@ impl Layout {
 
             This will feel scuffed if you want to change some stuff outside this section though.*/
 
-            put_insights_on_top: false, 
+            put_insights_on_top: true, 
         }
     }
 
@@ -61,8 +61,8 @@ impl Layout {
             .constraints([
                 // TODO Make these depend on layout. Right now it's top center bottom, should be top main bottom. Always, even if the panels are inverted. So default inverted layout is weird.
                 Constraint::Length(self.header_height),
-                Constraint::Min(self.center_height),
-                Constraint::Length(self.bottom_height)
+                Constraint::Length(self.center_height),
+                Constraint::Min(self.bottom_height)
                 
             ])
             .split(area);
@@ -71,11 +71,11 @@ impl Layout {
         // Must be mut to be changed in if.        
         let mut header = vertical[0];
         let mut main = vertical[1];
-        let mut bottom = vertical[2];
+        let mut graph_panel = vertical[2];
         
         if self.put_insights_on_top {
             header = vertical[0];
-            bottom = vertical[1];
+            graph_panel = vertical[1];
             main = vertical[2];
         }
 
@@ -111,11 +111,11 @@ impl Layout {
             ])
             .split(right_panel);
         let mut detail_panel = right_split[0];
-        let mut graph_panel = right_split[1];
+        let mut bottom_panel = right_split[1];
         if self.invert_side_vertical_split {
             // This is a bit confusing because I don't want to change the variable names, but when it's inverted, the top panel is actually the bottom panel and the bottom panel is actually the top panel.
             detail_panel = right_split[1];
-            graph_panel = right_split[0]; 
+            bottom_panel = right_split[0]; 
         }
 
         LayoutAreas {
