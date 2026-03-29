@@ -93,6 +93,8 @@ impl App {
             theme = Theme::light();
         } else if theme_name == "dark" {
             theme = Theme::dark();
+        } else if theme_name == "green" {
+            theme = Theme::green();
         } else {
             eprintln!("Invalid theme: {theme_name}. Did you add it to app.rs? Using dark as fallback.");
         }

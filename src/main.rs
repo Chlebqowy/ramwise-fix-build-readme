@@ -60,7 +60,7 @@ struct Args {
     debug: bool,
 
     /// Theme (by default light or dark)
-    #[arg(long, default_value = "dark")]
+    #[arg(long, default_value = "green")]
     theme: String,
 }
 
