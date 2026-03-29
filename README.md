@@ -114,6 +114,12 @@ ramwise now supports direct process signaling from the process list:
 
 Action results are shown as in-app status messages (success, warning, or error).
 
+## Configuration
+
+Sadly, there is no one single easy-to-use config. You have to make changes to the code itself but it's fairly easy and a lot is explained in comments. 
+
+To modify the layout, go to src/ui/layout.rs. If you are not very experienced with coding, just modify the values in pub fn new() -> Self { Self {. If you can code, you can also modify the rest of the file. The layout and library is fairly simple. 
+
 ## Insight Rules
 
 ramwise includes intelligent analysis rules:
