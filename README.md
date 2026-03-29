@@ -120,6 +120,18 @@ Sadly, there is no one single easy-to-use config. You have to make changes to th
 
 To modify the layout, go to src/ui/layout.rs. If you are not very experienced with coding, just modify the values in pub fn new() -> Self { Self {. If you can code, you can also modify the rest of the file. The layout and library is fairly simple. 
 
+To modify the theme, go to src/ui/theme.rs
+pub fn dark() -> Self {
+        Self {
+You can also copy that object and rename it to use another theme.
+To set it, change dark to your theme name in
+impl Default for Theme {
+    fn default() -> Self {
+        Self::dark()
+    }
+}
+
+
 ## Insight Rules
 
 ramwise includes intelligent analysis rules:
