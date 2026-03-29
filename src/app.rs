@@ -17,8 +17,8 @@ pub enum Focus {
     #[default]
     ProcessList,
     DetailPanel,
-    GraphPanel,
     InsightsPanel,
+    GraphPanel,
 }
 
 impl Focus {
