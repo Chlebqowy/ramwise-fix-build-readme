@@ -38,66 +38,68 @@ impl Layout {
 
     /// Calculate all layout areas from the terminal size
     pub fn calculate(&self, area: Rect) -> LayoutAreas {
-        // Split into header, main, and bottom
+        // Some issues with doc comments here that I can't fix. Look at compile warnings for info.
+        /** Split into header, main, and bottom
+        Constraints for header, main, and bottom panels. You can use either Length or Min for either. Length will give a fixed size, while Min will take up remaining space after Length constraints are applied. If there are multiple Min constraints, the space will be split between them as close to equal as possible while respecting the minimum sizes.
+        This will still apply based on direction, even if panels are inverted! **/
         let vertical = RatatuiLayout::default()
             .direction(Direction::Vertical)
             .constraints([
-                /// Constraints for header, main, and bottom panels. You can use either Length or Min for either. Length will give a fixed size, while Min will take up remaining space after Length constraints are applied. If there are multiple Min constraints, the space will be split between them as close to equal as possible while respecting the minimum sizes.
                 Constraint::Length(self.header_height),
                 Constraint::Min(self.main_height),
-                Constraint::Length(self.bottom_height),
+                Constraint::Length(self.bottom_height)
             ])
             .split(area);
+
+        // Must be done this way. Defining in if will make them look undefined to the compiler. Else is useless for that reason.
+        // Must be mut to be changed in if.        
+        let mut header = vertical[0];
+        let mut main = vertical[1];
+        let mut bottom = vertical[2];
+        
         if self.put_insights_on_top {
-            let header = vertical[0];
-            let bottom = vertical[1];
-            let main = vertical[2];
-        } else {
-            let header = vertical[0];
-            let main = vertical[1];
-            let bottom = vertical[2];
+            header = vertical[0];
+            bottom = vertical[1];
+            main = vertical[2];
         }
 
-        // Split main into left and right panels
+        /** Split main into left and right panels
+        You can make the constraints use lenght and min as well and you can do it the same way as the vertical split. The variables are not created though. Here's an example of how you could do it: Constraint::Length(10), Constraint::Min(5),
+        This will still apply based on direction, even if panels are inverted! **/
         let horizontal = RatatuiLayout::default()
             .direction(Direction::Horizontal)
             .constraints([
-                /// You can make this use lenght and min as well and you can do it the same way as the vertical split. The variables are not created though. Here's an example of how you could do it:
-                /// Constraint::Length(10),
-                /// Constraint::Min(5),
                 Constraint::Percentage(self.left_width_percent),
-                Constraint::Percentage(100 - self.left_width_percent), 
-                /// This will still apply based on direction, even if panels are inverted!
+                Constraint::Percentage(100 - self.left_width_percent)
             ])
             .split(main);
 
+        // This is a bit confusing because I don't want to change the variable names, but when it's inverted, the right panel is actually the left panel and the left panel is actually the right panel.
+        let mut left_panel = horizontal[0];
+        let mut right_panel = horizontal[1];
+        
         if self.invert_horizontal_split {
-            /// This is a bit confusing because I don't want to change the variable names, but when it's inverted, the right panel is actually the left panel and the left panel is actually the right panel.
-            let right_panel = horizontal[0];
-            let left_panel = horizontal[1];
-        } else {
-            let left_panel = horizontal[0];
-            let right_panel = horizontal[1];
+            right_panel = horizontal[0];
+            left_panel = horizontal[1];
         }
 
 
-        // Split right panel into detail and graph
+        /** Split right panel into detail and graph
+        Same as for horizontal 
+        This will still apply based on direction, even if panels are inverted! **/
         let right_split = RatatuiLayout::default()
             .direction(Direction::Vertical)
             .constraints([
-                /// Same as for horizontal 
                 Constraint::Percentage(self.side_vertical_split_percent),
                 Constraint::Percentage(100 - self.side_vertical_split_percent),
-                /// This will still apply based on direction, even if panels are inverted!
             ])
             .split(right_panel);
+        let mut detail_panel = right_split[0];
+        let mut graph_panel = right_split[1];
         if self.invert_side_vertical_split {
-            /// This is a bit confusing because I don't want to change the variable names, but when it's inverted, the top panel is actually the bottom panel and the bottom panel is actually the top panel.
-            let detail_panel = right_split[1];
-            let graph_panel = right_split[0]; 
-        } else {
-            let detail_panel = right_split[0];
-            let graph_panel = right_split[1];
+            // This is a bit confusing because I don't want to change the variable names, but when it's inverted, the top panel is actually the bottom panel and the bottom panel is actually the top panel.
+            detail_panel = right_split[1];
+            graph_panel = right_split[0]; 
         }
 
         LayoutAreas {
