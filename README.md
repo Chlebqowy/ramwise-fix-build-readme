@@ -47,7 +47,7 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/ramwise/ramwise.git
+git clone https://github.com/Duckaet/ramwise
 cd ramwise
 
 # Build release binary
