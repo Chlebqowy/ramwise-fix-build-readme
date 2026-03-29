@@ -14,6 +14,12 @@ pub struct Layout {
     pub left_width_percent: u16,
     /// Percentage of the top panel for the right side split (by default contains details and graph)
     pub side_vertical_split_percent: u16,
+    /// If this value is true, the left panel will be on the right and the right panel will be on the left.
+    pub invert_horizontal_split: bool,
+    /// If this value is true, the top panel will be on the bottom and the bottom panel will be on the top.
+    pub invert_side_vertical_split: bool,
+    /// If this value is true, the insights panel will be below the header and above main
+    pub put_insights_on_top: bool,
 }
 
 impl Layout {
@@ -24,6 +30,9 @@ impl Layout {
             bottom_height: 4,
             left_width_percent: 40,
             side_vertical_split_percent: 60,
+            invert_horizontal_split: false,
+            invert_side_vertical_split: false,
+            put_insights_on_top: false,
         }
     }
 
@@ -39,10 +48,15 @@ impl Layout {
                 Constraint::Length(self.bottom_height),
             ])
             .split(area);
-
-        let header = vertical[0];
-        let main = vertical[1];
-        let bottom = vertical[2];
+        if self.put_insights_on_top {
+            let header = vertical[0];
+            let bottom = vertical[1];
+            let main = vertical[2];
+        } else {
+            let header = vertical[0];
+            let main = vertical[1];
+            let bottom = vertical[2];
+        }
 
         // Split main into left and right panels
         let horizontal = RatatuiLayout::default()
@@ -52,12 +66,20 @@ impl Layout {
                 /// Constraint::Length(10),
                 /// Constraint::Min(5),
                 Constraint::Percentage(self.left_width_percent),
-                Constraint::Percentage(100 - self.left_width_percent),
+                Constraint::Percentage(100 - self.left_width_percent), 
+                /// This will still apply based on direction, even if panels are inverted!
             ])
             .split(main);
 
-        let left_panel = horizontal[0];
-        let right_panel = horizontal[1];
+        if self.invert_horizontal_split {
+            /// This is a bit confusing because I don't want to change the variable names, but when it's inverted, the right panel is actually the left panel and the left panel is actually the right panel.
+            let right_panel = horizontal[0];
+            let left_panel = horizontal[1];
+        } else {
+            let left_panel = horizontal[0];
+            let right_panel = horizontal[1];
+        }
+
 
         // Split right panel into detail and graph
         let right_split = RatatuiLayout::default()
@@ -66,11 +88,17 @@ impl Layout {
                 /// Same as for horizontal 
                 Constraint::Percentage(self.side_vertical_split_percent),
                 Constraint::Percentage(100 - self.side_vertical_split_percent),
+                /// This will still apply based on direction, even if panels are inverted!
             ])
             .split(right_panel);
-
-        let detail_panel = right_split[0];
-        let graph_panel = right_split[1];
+        if self.invert_side_vertical_split {
+            /// This is a bit confusing because I don't want to change the variable names, but when it's inverted, the top panel is actually the bottom panel and the bottom panel is actually the top panel.
+            let detail_panel = right_split[1];
+            let graph_panel = right_split[0]; 
+        } else {
+            let detail_panel = right_split[0];
+            let graph_panel = right_split[1];
+        }
 
         LayoutAreas {
             header,
